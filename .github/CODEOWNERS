@@ -1,3 +1,2 @@
-# Both members are notified on every PR. Review is optional on normal PRs (Goutam is busy);
-# it is expected only for the shared contract files listed in AGENTS.md.
-* @Pranav-0710 @GoutamAdityan
+# Pranav owns everything this round (Goutam is not available). PRs need no second reviewer.
+* @Pranav-0710

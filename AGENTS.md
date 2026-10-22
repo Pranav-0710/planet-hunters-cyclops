@@ -8,10 +8,7 @@ Team Cyclops, ML Challenge Hack4Hack 2026 Round 1 (Planet Hunters). Predict one 
 
 Stack: Python, numpy, pandas, scipy, scikit-learn, LightGBM, astropy, PyTorch (CNN on Kaggle only).
 
-Owners:
-
-- Jey Pranav (A): everything heavy - loader, folds, detrending, transit/centroid/frequency/glitch features, LightGBM, CNN run, blend, submissions
-- Goutam Adityan (B): small tasks only, each about one hour - flare counter, plots, optional light reviews
+Owner: Jey Pranav owns every issue. Goutam Adityan is on the team but not available for this round.
 
 ## Git workflow
 
