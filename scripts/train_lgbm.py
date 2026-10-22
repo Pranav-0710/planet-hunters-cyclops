@@ -1,7 +1,7 @@
 """LightGBM on all features (issue #9). Needs build_detrended.py and build_features.py first.
 
-Two stages: train on folds.csv, then down-weight training stars whose OOF probability for their own
-label is very low (about 2% of labels are vetting mistakes) and train again. Writes oof/lgbm_{oof,test}.csv.
+Trains on folds.csv. With --denoise, a second stage down-weights training stars whose OOF probability for
+their own label is very low (about 2% of labels are vetting mistakes). Writes oof/<name>_{oof,test}.csv.
 """
 
 import argparse
@@ -20,12 +20,15 @@ from ph.features.stats import stat_block  # noqa: E402
 CACHE = DATA / "cache"
 META = ["tmag", "teff", "logg", "radius", "contamination"]
 PARAMS = dict(
-    objective="multiclass", num_class=len(LABELS), learning_rate=0.03, num_leaves=63,
+    objective="multiclass", num_class=len(LABELS), learning_rate=0.05, num_leaves=63,
     min_child_samples=20, feature_fraction=0.6, bagging_fraction=0.8, bagging_freq=1,
     lambda_l2=1.0, class_weight="balanced", n_estimators=3000, random_state=SEED, verbose=-1,
+    n_jobs=8,  # all 22 logical cores is slower on this laptop (thread oversubscription)
 )
-NOISY_PROBA = 0.05
+NOISY_PROBA = 0.02
 NOISY_WEIGHT = 0.2
+# Features that separate the train sector from the test sector more than they separate classes
+DROP = ["transit_near_dump_frac"]
 
 
 def load_features(name: str) -> pd.DataFrame:
@@ -34,7 +37,7 @@ def load_features(name: str) -> pd.DataFrame:
     fast = np.load(CACHE / f"{name}_fast.npy")
     star = pd.read_csv(CACHE / f"{name}_feat_star.csv")
     blocks = pd.concat([stat_block(clean, "clean_"), stat_block(fast, "fast_")], axis=1)
-    star = star.drop(columns=[c for c in star.columns if c in blocks.columns])
+    star = star.drop(columns=[c for c in star.columns if c in blocks.columns or c in DROP])
     return pd.concat([blocks, star, stars[META]], axis=1)
 
 
@@ -59,6 +62,7 @@ def cv(X: pd.DataFrame, y: np.ndarray, X_test: pd.DataFrame, folds: np.ndarray, 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--name", default="lgbm")
+    ap.add_argument("--denoise", action="store_true", help="second stage that down-weights suspected label errors")
     args = ap.parse_args()
 
     train = pd.read_csv(DATA / "train_stars.csv")
@@ -69,14 +73,15 @@ def main() -> None:
     print(f"{X.shape[1]} features")
 
     print("stage 1")
-    oof, _, _ = cv(X, y, X_test, folds, np.ones(len(y)))
+    oof, test_proba, imp = cv(X, y, X_test, folds, np.ones(len(y)))
     print(f"stage 1 OOF macro-F1: {f1_score(y, oof.argmax(1), average='macro'):.4f}")
 
-    own = oof[np.arange(len(y)), y]
-    w = np.where(own < NOISY_PROBA, NOISY_WEIGHT, 1.0)
-    print(f"stage 2: down-weighting {(w < 1).sum()} suspected label errors ({(w < 1).mean():.1%})")
-    oof, test_proba, imp = cv(X, y, X_test, folds, w)
-    print(f"stage 2 OOF macro-F1: {f1_score(y, oof.argmax(1), average='macro'):.4f}")
+    if args.denoise:
+        own = oof[np.arange(len(y)), y]
+        w = np.where(own < NOISY_PROBA, NOISY_WEIGHT, 1.0)
+        print(f"stage 2: down-weighting {(w < 1).sum()} suspected label errors ({(w < 1).mean():.1%})")
+        oof, test_proba, imp = cv(X, y, X_test, folds, w)
+        print(f"stage 2 OOF macro-F1: {f1_score(y, oof.argmax(1), average='macro'):.4f}")
     print(classification_report(y, oof.argmax(1), target_names=LABELS, digits=3))
     print("top features:\n" + imp.head(25).round(0).to_string())
 

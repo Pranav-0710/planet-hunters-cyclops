@@ -1,9 +1,10 @@
 """Detrending shared by every feature family (issue #3).
 
 clean = relative flux minus the camera/CCD common trend (top principal components of that CCD's stars,
-        fitted per star), with data gaps set to NaN
+        fitted per star), with gaps, momentum dumps, scattered light and data-driven bad cadences set to NaN
 slow  = ~1 day running median of clean (rotation, spots, slow pulsation)
-fast  = clean - slow, with momentum-dump and scattered-light cadences also set to NaN (dip and flare search)
+fast  = clean - slow (dip and flare search)
+noisy = the (t,) mask of cadences set to NaN besides the data gap
 
 Everything is computed within one sector, so train and test each get their own trends.
 """
@@ -16,6 +17,7 @@ from ph.data import Split, relative_flux
 N_COMPONENTS = 3
 SLOW_WINDOW = 49  # cadences, ~1 day at 30 min
 DUMP_PAD = 1  # also mask this many cadences on each side of a momentum dump
+BAD_CADENCE_FACTOR = 1.3
 
 
 def quality_masks(cadences: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
@@ -82,19 +84,60 @@ def detrend_split(s: Split) -> dict[str, np.ndarray]:
     cen = cen - np.nanmedian(cen, axis=2, keepdims=True)
     cen[:, :, gap] = np.nan
 
-    clean = np.empty_like(f)
-    for _, idx in s.stars.groupby(["camera", "ccd"]).indices.items():
-        basis = ccd_basis(f[idx])
-        clean[idx] = remove_common_trend(f[idx], basis, valid=~gap & ~noisy)
+    groups = list(s.stars.groupby(["camera", "ccd"]).indices.values())
+    clean = _clean_pass(f, groups, valid=~gap & ~noisy)
+    noisy |= bad_cadences(clean)
+    clean = _clean_pass(f, groups, valid=~gap & ~noisy)
+    clean[:, noisy] = np.nan
+    for idx in groups:
         for c in range(2):
             cen[idx, c] -= np.nanmedian(cen[idx, c], axis=0)
+    cen[:, :, noisy] = np.nan
 
     slow = running_median(clean)
     fast = clean - slow
-    fast[:, noisy] = np.nan
     return {
         "clean": clean.astype(np.float32),
         "slow": slow.astype(np.float32),
         "fast": fast.astype(np.float32),
         "cen": cen.astype(np.float32),
+        "noisy": noisy,
     }
+
+
+def apply_mask(out: dict[str, np.ndarray], mask: np.ndarray) -> dict[str, np.ndarray]:
+    """Mask extra cadences in a detrend_split result and recompute slow and fast.
+
+    Used with the union of both sectors' masks so train and test share the same observing window:
+    otherwise transit counts and periodogram shapes differ by sector, not by class.
+    """
+    clean = out["clean"].astype(np.float64)
+    clean[:, mask] = np.nan
+    cen = out["cen"].copy()
+    cen[:, :, mask] = np.nan
+    slow = running_median(clean)
+    return {
+        "clean": clean.astype(np.float32),
+        "slow": slow.astype(np.float32),
+        "fast": (clean - slow).astype(np.float32),
+        "cen": cen,
+        "noisy": out["noisy"] | mask,
+    }
+
+
+def _clean_pass(f: np.ndarray, groups: list[np.ndarray], valid: np.ndarray) -> np.ndarray:
+    clean = np.empty_like(f)
+    for idx in groups:
+        clean[idx] = remove_common_trend(f[idx], ccd_basis(f[idx]), valid=valid)
+    return clean
+
+
+def bad_cadences(clean: np.ndarray) -> np.ndarray:
+    """Cadences where the typical star is off (scattered light, dumps), found from the data of this sector.
+
+    The flags miss some of them in a new sector (scattered light runs past the flagged range), so we look at
+    the median |z| across all stars at each cadence and mask cadences well above the usual level.
+    """
+    z = clean / _robust_scale(clean)
+    spread = np.nanmedian(np.abs(z), axis=0)
+    return spread > BAD_CADENCE_FACTOR * np.nanmedian(spread)
