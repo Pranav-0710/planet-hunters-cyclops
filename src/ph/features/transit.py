@@ -21,10 +21,10 @@ def in_transit_mask(t: np.ndarray, period: float, duration: float, t0: float, fr
     return np.abs(phase) < 0.5 * duration * frac
 
 
-def bls_search(t: np.ndarray, f: np.ndarray) -> tuple[BoxLeastSquares, dict]:
+def bls_search(t: np.ndarray, f: np.ndarray, durations: list[float] = DURATIONS) -> tuple[BoxLeastSquares, dict]:
     ok = ~np.isnan(f)
     bls = BoxLeastSquares(t[ok], f[ok], dy=np.full(ok.sum(), robust_std(f)))
-    r = bls.power(PERIODS, DURATIONS, objective="likelihood")
+    r = bls.power(PERIODS, durations, objective="likelihood")
     i = int(np.argmax(r.power))
     best = {
         "period": float(r.period[i]), "duration": float(r.duration[i]), "t0": float(r.transit_time[i]),
@@ -35,10 +35,12 @@ def bls_search(t: np.ndarray, f: np.ndarray) -> tuple[BoxLeastSquares, dict]:
     return bls, best
 
 
-def transit_features(t: np.ndarray, fast: np.ndarray, dump_times: np.ndarray) -> tuple[dict, dict]:
+def transit_features(
+    t: np.ndarray, fast: np.ndarray, dump_times: np.ndarray, durations: list[float] = DURATIONS
+) -> tuple[dict, dict]:
     """Return (features, ephemeris). Ephemeris feeds the centroid features."""
     sig = robust_std(fast)
-    bls, b = bls_search(t, fast)
+    bls, b = bls_search(t, fast, durations)
     st = bls.compute_stats(b["period"], b["duration"], b["t0"])
 
     d_odd, e_odd = st["depth_odd"]

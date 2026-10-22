@@ -7,3 +7,5 @@ One row per upload. 10 uploads possible: 5 on 22 Oct, 5 on 23 Oct (after midnigh
 | 1 | 22 Oct 19:44 | 02_lgbm.csv | 95dfd54 | 0.7300 | 0.7085 | LightGBM, 103 features; 01_baseline never uploaded |
 | 2 | 22 Oct 19:45 | 03_lgbm_v2.csv | 3aa6fc7 | 0.7261 | 0.7243 | per-sector bad-cadence masking (best) |
 | 3 | 22 Oct 19:57 | 04_lgbm_v3.csv | 75509d5 | 0.7291 | 0.7131 | union mask across sectors: better locally, worse publicly; dropped |
+| 4 | 22 Oct 20:41 | 05_lgbm_v4.csv | 189fcd9 | 0.7345 | 0.7359 | v2 masking + half-day transit search |
+| 5 | 22 Oct 21:17 | 06_lgbm_v4_cnn.csv | fb7ba5b | 0.7507 | 0.7564 | LightGBM v4 0.6 + CNN (12 epochs) 0.4 (best; 14th of 54) |

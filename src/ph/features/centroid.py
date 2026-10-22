@@ -9,7 +9,20 @@ from scipy import ndimage
 from ph.features.transit import in_transit_mask, robust_std
 
 
-def high_pass(x: np.ndarray, window: int = 49) -> np.ndarray:
+def level_segments(x: np.ndarray, breaks: np.ndarray) -> np.ndarray:
+    """Subtract each segment's median; segments end at momentum dumps, where the pointing steps."""
+    out = x.copy()
+    edges = np.concatenate([[0], np.sort(breaks), [len(x)]])
+    for a, b in zip(edges[:-1], edges[1:]):
+        seg = out[a:b]
+        if np.isfinite(seg).any():
+            out[a:b] = seg - np.nanmedian(seg)
+    return out
+
+
+def high_pass(x: np.ndarray, window: int = 49, breaks: np.ndarray | None = None) -> np.ndarray:
+    if breaks is not None and len(breaks):
+        x = level_segments(x, breaks)
     ok = ~np.isnan(x)
     if ok.sum() < window:
         return np.full_like(x, np.nan)
@@ -20,13 +33,15 @@ def high_pass(x: np.ndarray, window: int = 49) -> np.ndarray:
     return out
 
 
-def centroid_features(t: np.ndarray, fast: np.ndarray, cen: np.ndarray, ephem: dict) -> dict:
+def centroid_features(
+    t: np.ndarray, fast: np.ndarray, cen: np.ndarray, ephem: dict, dump_idx: np.ndarray | None = None
+) -> dict:
     feats: dict[str, float] = {}
     intr = in_transit_mask(t, ephem["period"], ephem["duration"], ephem["t0"])
     shifts_snr = []
     depth = -np.nanmean(fast[intr]) if intr.any() else 0.0
     for c, name in ((0, "col"), (1, "row")):
-        x = high_pass(cen[c])
+        x = high_pass(cen[c], breaks=dump_idx)
         noise = robust_std(x)
         ok_in = intr & ~np.isnan(x)
         ok_out = ~intr & ~np.isnan(x)

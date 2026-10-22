@@ -15,7 +15,7 @@ from sklearn.metrics import classification_report, f1_score
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from ph.data import DATA, LABELS, ROOT, SEED, load_folds  # noqa: E402
-from ph.features.stats import stat_block  # noqa: E402
+from ph.features.stats import stat_block, variability_block  # noqa: E402
 
 CACHE = DATA / "cache"
 META = ["tmag", "teff", "logg", "radius", "contamination"]
@@ -31,14 +31,22 @@ NOISY_WEIGHT = 0.2
 DROP = ["transit_near_dump_frac"]
 
 
-def load_features(name: str) -> pd.DataFrame:
+def load_features(name: str, variability: bool = False) -> pd.DataFrame:
     stars = pd.read_csv(DATA / f"{name}_stars.csv")
     clean = np.load(CACHE / f"{name}_clean.npy")
     fast = np.load(CACHE / f"{name}_fast.npy")
     star = pd.read_csv(CACHE / f"{name}_feat_star.csv")
-    blocks = pd.concat([stat_block(clean, "clean_"), stat_block(fast, "fast_")], axis=1)
+    parts = [stat_block(clean, "clean_"), stat_block(fast, "fast_")]
+    if variability:
+        parts.append(variability_block(clean, np.load(CACHE / f"{name}_slow.npy"), fast))
+    blocks = pd.concat(parts, axis=1)
     star = star.drop(columns=[c for c in star.columns if c in blocks.columns or c in DROP])
-    return pd.concat([blocks, star, stars[META]], axis=1)
+    parts = [blocks, star]
+    short_path = CACHE / f"{name}_feat_short.csv"
+    if short_path.exists():
+        short = pd.read_csv(short_path)
+        parts.append(short.drop(columns=[c for c in short.columns if c.removeprefix("s_") in DROP]))
+    return pd.concat([*parts, stars[META]], axis=1)
 
 
 def cv(X: pd.DataFrame, y: np.ndarray, X_test: pd.DataFrame, folds: np.ndarray, w: np.ndarray):
@@ -63,11 +71,12 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--name", default="lgbm")
     ap.add_argument("--denoise", action="store_true", help="second stage that down-weights suspected label errors")
+    ap.add_argument("--variability", action="store_true", help="add noise-normalized amplitude features (v5)")
     args = ap.parse_args()
 
     train = pd.read_csv(DATA / "train_stars.csv")
     test = pd.read_csv(DATA / "test_stars.csv")
-    X, X_test = load_features("train"), load_features("test")
+    X, X_test = load_features("train", args.variability), load_features("test", args.variability)
     y = train.label.map({lab: i for i, lab in enumerate(LABELS)}).to_numpy()
     folds = load_folds().to_numpy()
     print(f"{X.shape[1]} features")
